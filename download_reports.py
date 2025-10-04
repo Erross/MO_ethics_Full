@@ -18,12 +18,10 @@ from datetime import datetime
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
-from webdriver_manager.chrome import ChromeDriverManager
 
 class StealthBrowser:
     """Enhanced stealth browser with anti-detection measures"""
@@ -306,7 +304,7 @@ def run_step_8_multi_year():
     existing_ids = get_existing_report_ids(downloads_dir)
     print(f"\nFound {len(existing_ids)} existing reports to skip")
 
-    # Chrome setup
+    # Chrome setup - NUCLEAR OPTION: Let Selenium find ChromeDriver automatically
     chrome_options = Options()
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
@@ -322,7 +320,8 @@ def run_step_8_multi_year():
     }
     chrome_options.add_experimental_option("prefs", prefs)
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    # NUCLEAR OPTION: No ChromeDriverManager - let Selenium handle it
+    driver = webdriver.Chrome(options=chrome_options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     stealth = StealthBrowser(driver)
 
