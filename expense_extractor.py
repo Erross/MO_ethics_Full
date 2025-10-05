@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 from collections import defaultdict
-
+from config import Config
 
 def extract_report_metadata(pdf_path: str) -> Dict:
     """Extract basic report info to identify and deduplicate reports."""

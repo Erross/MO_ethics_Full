@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional, List
-
+from config import Config
 
 def extract_mo_ethics_report_data(pdf_path: str, debug: bool = False) -> Dict[str, Optional[str]]:
     """

@@ -9,12 +9,18 @@ Process:
 4. Repeat until all files present or max retries hit
 5. Validate reports
 6. Run extractors once complete
+
+Usage:
+    python orchestrator.py                                    # Use default committee
+    python orchestrator.py --committee "Committee Name"       # Override committee
+    python orchestrator.py --committee "Committee Name" --mecid "C1234"  # With MEC ID
 """
 
 import subprocess
 import sys
 import time
 import re
+import argparse
 from pathlib import Path
 from typing import Set
 
@@ -23,6 +29,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+
+from config import Config
 
 
 def get_expected_reports_from_website() -> Set[str]:
@@ -65,7 +73,7 @@ def get_expected_reports_from_website() -> Set[str]:
             ("name", "ctl00$ctl00$ContentPlaceHolder$ContentPlaceHolder1$txtComm")
         ))
         committee_input.clear()
-        committee_input.send_keys("Francis Howell Families")
+        committee_input.send_keys(Config.COMMITTEE_NAME)
         time.sleep(2)
 
         # Click search
@@ -75,10 +83,21 @@ def get_expected_reports_from_website() -> Set[str]:
         search_button.click()
         time.sleep(3)
 
-        # Click on committee
+        # Click on committee (use MECID if available, otherwise first result)
         results_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_gvResults")
-        mecid_links = results_table.find_elements("partial link text", "C2116")
-        mecid_links[0].click()
+        if Config.COMMITTEE_MECID:
+            mecid_links = results_table.find_elements("partial link text", Config.COMMITTEE_MECID)
+            if mecid_links:
+                mecid_links[0].click()
+            else:
+                # Fallback to first result
+                print(f"WARNING: MECID {Config.COMMITTEE_MECID} not found, using first result")
+                first_link = results_table.find_element("tag name", "a")
+                first_link.click()
+        else:
+            # Use first result
+            first_link = results_table.find_element("tag name", "a")
+            first_link.click()
         time.sleep(3)
 
         # Go to Reports tab
@@ -135,9 +154,9 @@ def get_expected_reports_from_website() -> Set[str]:
                     except:
                         continue
 
-                # Generate expected filenames
+                # Generate expected filenames using Config
                 for report_id in report_ids:
-                    filename = f"FHF_{year}_Step8_{report_id}.pdf"
+                    filename = Config.get_filename_pattern(year, report_id)
                     expected_files.add(filename)
 
                 print(f"  Found {len(report_ids)} reports for {year}")
@@ -218,6 +237,29 @@ def run_extractors() -> None:
 def main():
     """Main orchestrator logic."""
 
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='MEC Report Orchestrator - Download and extract campaign finance reports'
+    )
+    parser.add_argument(
+        '--committee',
+        type=str,
+        help='Committee name to process (default: Francis Howell Families)'
+    )
+    parser.add_argument(
+        '--mecid',
+        type=str,
+        help='MEC Committee ID for targeted search (e.g., C2116)'
+    )
+
+    args = parser.parse_args()
+
+    # Set committee if provided
+    if args.committee:
+        Config.set_committee(args.committee, args.mecid)
+        print(f"Processing committee: {Config.COMMITTEE_NAME}")
+        print(f"File prefix: {Config.get_file_prefix()}")
+
     downloads_dir = Path.cwd() / "PDFs"
     downloads_dir.mkdir(exist_ok=True)
 
@@ -226,6 +268,8 @@ def main():
     print("=" * 80)
     print("MEC REPORT ORCHESTRATOR")
     print("=" * 80)
+    print(f"Committee: {Config.COMMITTEE_NAME}")
+    print(f"File prefix: {Config.get_file_prefix()}")
     print(f"Max retry attempts: {MAX_RETRIES}")
     print(f"Downloads directory: {downloads_dir}")
 

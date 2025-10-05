@@ -14,11 +14,14 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 import pdfplumber
 
+from config import Config
+
 
 def extract_filename_info(filename: str) -> Optional[Dict]:
-    """Extract year and report ID from filename."""
-    # Pattern: FHF_{year}_Step8_{report_id}.pdf
-    match = re.match(r'FHF_(\d{4})_Step8_(\d+)\.pdf', filename)
+    """Extract year and report ID from filename using config pattern."""
+    # Use dynamic pattern from config
+    pattern = Config.get_filename_regex()
+    match = re.match(pattern, filename)
     if match:
         return {
             'filename_year': int(match.group(1)),
@@ -236,5 +239,4 @@ def main():
 
 if __name__ == "__main__":
     import sys
-
     sys.exit(main())
