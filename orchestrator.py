@@ -46,7 +46,7 @@ def get_expected_reports_from_website() -> Set[str]:
     driver = None
 
     try:
-        # EXACT same Chrome setup as working downloader
+        # Chrome setup
         chrome_options = Options()
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
@@ -67,13 +67,33 @@ def get_expected_reports_from_website() -> Set[str]:
         driver.get("https://mec.mo.gov/MEC/Campaign_Finance/CFSearch.aspx#gsc.tab=0")
         time.sleep(3)
 
-        # Search for committee
         wait = WebDriverWait(driver, 15)
-        committee_input = wait.until(EC.presence_of_element_located(
-            ("name", "ctl00$ctl00$ContentPlaceHolder$ContentPlaceHolder1$txtComm")
-        ))
-        committee_input.clear()
-        committee_input.send_keys(Config.COMMITTEE_NAME)
+
+        # Handle search type
+        if Config.SEARCH_TYPE == "candidate":
+            print(f"Searching by candidate: {Config.CANDIDATE_NAME}")
+            candidate_input = wait.until(EC.presence_of_element_located(
+                ("name", "ctl00$ctl00$ContentPlaceHolder$ContentPlaceHolder1$txtCand")
+            ))
+            candidate_input.clear()
+            candidate_input.send_keys(Config.CANDIDATE_NAME)
+
+        elif Config.SEARCH_TYPE == "mecid":
+            print(f"Searching by MECID: {Config.COMMITTEE_MECID}")
+            mecid_input = wait.until(EC.presence_of_element_located(
+                ("name", "ctl00$ctl00$ContentPlaceHolder$ContentPlaceHolder1$txtMECID")
+            ))
+            mecid_input.clear()
+            mecid_input.send_keys(Config.COMMITTEE_MECID)
+
+        else:  # committee
+            print(f"Searching by committee: {Config.COMMITTEE_NAME}")
+            committee_input = wait.until(EC.presence_of_element_located(
+                ("name", "ctl00$ctl00$ContentPlaceHolder$ContentPlaceHolder1$txtComm")
+            ))
+            committee_input.clear()
+            committee_input.send_keys(Config.COMMITTEE_NAME)
+
         time.sleep(2)
 
         # Click search
@@ -83,21 +103,29 @@ def get_expected_reports_from_website() -> Set[str]:
         search_button.click()
         time.sleep(3)
 
-        # Click on committee (use MECID if available, otherwise first result)
+        # Select from results
         results_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_gvResults")
-        if Config.COMMITTEE_MECID:
-            mecid_links = results_table.find_elements("partial link text", Config.COMMITTEE_MECID)
-            if mecid_links:
-                mecid_links[0].click()
-            else:
-                # Fallback to first result
-                print(f"WARNING: MECID {Config.COMMITTEE_MECID} not found, using first result")
-                first_link = results_table.find_element("tag name", "a")
-                first_link.click()
+        all_links = results_table.find_elements("tag name", "a")
+
+        mecid_link = None
+        discovered_mecid = None
+        for link in all_links:
+            link_text = link.text.strip()
+            if re.match(r'^[A-Z]\d{5,7}$', link_text):
+                mecid_link = link
+                discovered_mecid = link_text
+                print(f"Found MECID: {link_text}")
+                if not Config.COMMITTEE_MECID:
+                    Config.COMMITTEE_MECID = discovered_mecid
+                    print(f"Saved MECID to Config: {discovered_mecid}")
+                break
+
+        if mecid_link:
+            mecid_link.click()
         else:
-            # Use first result
-            first_link = results_table.find_element("tag name", "a")
-            first_link.click()
+            print("WARNING: No MECID link found in results, using first link")
+            all_links[0].click()
+
         time.sleep(3)
 
         # Go to Reports tab
@@ -105,7 +133,7 @@ def get_expected_reports_from_website() -> Set[str]:
         reports_link.click()
         time.sleep(4)
 
-        # Discover all available years
+        # Discover available years
         print("Discovering available years...")
         main_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_grvReportOutside")
         year_labels = main_table.find_elements("css selector", "span[id*='lblYear']")
@@ -122,11 +150,9 @@ def get_expected_reports_from_website() -> Set[str]:
         available_years.sort(reverse=True)
         print(f"Found years: {available_years}")
 
-        # Process each year to find report IDs
+        # Process each year
         for year in available_years:
             print(f"\nChecking year {year}...")
-
-            # Find and click expand button for this year
             main_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_grvReportOutside")
             expand_buttons = main_table.find_elements("css selector", "input[id*='ImgRptRight']")
             year_labels = main_table.find_elements("css selector", "span[id*='lblYear']")
@@ -141,20 +167,17 @@ def get_expected_reports_from_website() -> Set[str]:
                 expand_buttons[year_index].click()
                 time.sleep(5)
 
-                # Find all report links for this year
+                # Collect reports
                 all_links = driver.find_elements("tag name", "a")
                 report_ids = []
-
                 for link in all_links:
                     try:
                         link_text = link.text.strip()
-                        if link_text.isdigit() and len(link_text) >= 5:
-                            if link.is_displayed():
-                                report_ids.append(link_text)
+                        if link_text.isdigit() and len(link_text) >= 5 and link.is_displayed():
+                            report_ids.append(link_text)
                     except:
                         continue
 
-                # Generate expected filenames using Config
                 for report_id in report_ids:
                     filename = Config.get_filename_pattern(year, report_id)
                     expected_files.add(filename)
@@ -182,26 +205,34 @@ def get_existing_files(downloads_dir: Path) -> Set[str]:
     if not downloads_dir.exists():
         return set()
 
-    existing = set()
-    for pdf_file in downloads_dir.glob("*.pdf"):
-        existing.add(pdf_file.name)
-
-    return existing
+    return {pdf_file.name for pdf_file in downloads_dir.glob("*.pdf")}
 
 
 def run_downloader() -> bool:
-    """Run the download_reports.py script."""
+    """Run the download_reports.py script with appropriate arguments."""
     print("\n" + "=" * 80)
     print("RUNNING DOWNLOADER")
     print("=" * 80)
 
     try:
-        result = subprocess.run(
-            [sys.executable, "download_reports.py"],
-            capture_output=False,
-            text=True
-        )
+        cmd = [sys.executable, "download_reports.py"]
+
+        if Config.SEARCH_TYPE == "candidate":
+            cmd.extend(["--candidate", Config.CANDIDATE_NAME])
+            if Config.COMMITTEE_MECID:
+                cmd.extend(["--mecid", Config.COMMITTEE_MECID])
+        elif Config.SEARCH_TYPE == "mecid":
+            cmd.extend(["--mecid-only", Config.COMMITTEE_MECID])
+        else:
+            cmd.extend(["--committee", Config.COMMITTEE_NAME])
+            if Config.COMMITTEE_MECID:
+                cmd.extend(["--mecid", Config.COMMITTEE_MECID])
+
+        print(f"Running: {' '.join(cmd)}")
+
+        result = subprocess.run(cmd, capture_output=False, text=True)
         return result.returncode == 0
+
     except Exception as e:
         print(f"ERROR running downloader: {e}")
         return False
@@ -213,19 +244,12 @@ def run_extractors() -> None:
     print("RUNNING EXTRACTORS")
     print("=" * 80)
 
-    extractors = [
-        "expense_extractor.py",
-        "donor_extractor.py"
-    ]
+    extractors = ["expense_extractor.py", "donor_extractor.py"]
 
     for extractor in extractors:
         print(f"\n>>> Running {extractor}...")
         try:
-            result = subprocess.run(
-                [sys.executable, extractor],
-                capture_output=False,
-                text=True
-            )
+            result = subprocess.run([sys.executable, extractor], capture_output=False, text=True)
             if result.returncode == 0:
                 print(f"✓ {extractor} completed successfully")
             else:
@@ -236,66 +260,67 @@ def run_extractors() -> None:
 
 def main():
     """Main orchestrator logic."""
-
-    # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description='MEC Report Orchestrator - Download and extract campaign finance reports'
+        description='MEC Report Orchestrator - Download and extract campaign finance reports',
+        epilog='Examples:\n'
+               '  python orchestrator.py --committee "Francis Howell Families"\n'
+               '  python orchestrator.py --candidate "John Smith" --mecid "C1234"\n'
+               '  python orchestrator.py --mecid-only "C2116"',
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        '--committee',
-        type=str,
-        help='Committee name to process (default: Francis Howell Families)'
-    )
-    parser.add_argument(
-        '--mecid',
-        type=str,
-        help='MEC Committee ID for targeted search (e.g., C2116)'
-    )
+
+    search_group = parser.add_mutually_exclusive_group()
+    search_group.add_argument('--committee', type=str, help='Committee name to process')
+    search_group.add_argument('--candidate', type=str, help='Candidate name to process')
+    search_group.add_argument('--mecid-only', type=str, dest='mecid_only', help='Search by MEC ID only')
+    parser.add_argument('--mecid', type=str, help='MEC Committee ID for filtering results')
 
     args = parser.parse_args()
 
-    # Set committee if provided
-    if args.committee:
-        Config.set_committee(args.committee, args.mecid)
-        print(f"Processing committee: {Config.COMMITTEE_NAME}")
-        print(f"File prefix: {Config.get_file_prefix()}")
+    # Configure search
+    if args.mecid_only:
+        Config.set_search(mecid=args.mecid_only)
+    elif args.candidate:
+        Config.set_search(candidate=args.candidate, mecid=args.mecid)
+    elif args.committee:
+        Config.set_search(committee=args.committee, mecid=args.mecid)
+
+    print(f"Search configured:")
+    print(f"  Type: {Config.SEARCH_TYPE}")
+    print(f"  Value: {Config.get_search_value()}")
+    print(f"  File prefix: {Config.get_file_prefix()}")
 
     downloads_dir = Path.cwd() / "PDFs"
     downloads_dir.mkdir(exist_ok=True)
-
     MAX_RETRIES = 20
 
-    print("=" * 80)
+    print("\n" + "=" * 80)
     print("MEC REPORT ORCHESTRATOR")
     print("=" * 80)
-    print(f"Committee: {Config.COMMITTEE_NAME}")
+    print(f"Target: {Config.get_display_name()}")
     print(f"File prefix: {Config.get_file_prefix()}")
     print(f"Max retry attempts: {MAX_RETRIES}")
     print(f"Downloads directory: {downloads_dir}")
 
-    # Get expected reports from website
+    # Step 1: Expected reports
     print("\n" + "=" * 80)
     print("STEP 1: CHECKING WHAT REPORTS SHOULD EXIST")
     print("=" * 80)
-
     expected_files = get_expected_reports_from_website()
 
     if not expected_files:
         print("\nERROR: Could not determine expected reports from website")
-        print("Cannot proceed without knowing what to download")
         sys.exit(1)
 
     print(f"\nExpected {len(expected_files)} total reports")
 
-    # Download loop
+    # Step 2: Download loop
     print("\n" + "=" * 80)
     print("STEP 2: DOWNLOAD LOOP")
     print("=" * 80)
 
     for attempt in range(1, MAX_RETRIES + 1):
         print(f"\n--- Attempt {attempt}/{MAX_RETRIES} ---")
-
-        # Check current status
         existing_files = get_existing_files(downloads_dir)
         missing_files = expected_files - existing_files
 
@@ -306,25 +331,19 @@ def main():
             print("\n✓ ALL REPORTS DOWNLOADED!")
             break
 
-        # Show sample of missing files
-        print(f"\nSample missing files:")
+        print("\nSample missing files:")
         for i, filename in enumerate(sorted(missing_files)[:5]):
             print(f"  - {filename}")
         if len(missing_files) > 5:
             print(f"  ... and {len(missing_files) - 5} more")
 
-        # Run downloader
         print(f"\nRunning downloader (attempt {attempt})...")
         success = run_downloader()
-
         if not success:
-            print(f"WARNING: Downloader returned error status")
+            print("WARNING: Downloader returned error status")
 
-        # Wait before rechecking
         time.sleep(5)
-
     else:
-        # Max retries reached
         existing_files = get_existing_files(downloads_dir)
         missing_files = expected_files - existing_files
 
@@ -336,29 +355,21 @@ def main():
         for filename in sorted(missing_files):
             print(f"  - {filename}")
 
-        # Ask user if they want to proceed with extractors anyway
         response = input("\nProceed with validation and extractors anyway? (y/n): ")
         if response.lower() != 'y':
-            print("Exiting without running extractors")
             sys.exit(1)
 
-    # Validate reports
+    # Step 3: Validation
     print("\n" + "=" * 80)
     print("STEP 3: VALIDATING REPORTS")
     print("=" * 80)
 
     try:
-        result = subprocess.run(
-            [sys.executable, "validate_reports.py"],
-            capture_output=False,
-            text=True
-        )
-
+        result = subprocess.run([sys.executable, "validate_reports.py"], capture_output=False, text=True)
         if result.returncode != 0:
             print("\n⚠ Validation found issues with report filenames")
             response = input("Continue with extractors anyway? (y/n): ")
             if response.lower() != 'y':
-                print("Exiting - please fix validation issues first")
                 sys.exit(1)
     except Exception as e:
         print(f"ERROR running validation: {e}")
@@ -366,18 +377,16 @@ def main():
         if response.lower() != 'y':
             sys.exit(1)
 
-    # Run extractors
+    # Step 4: Extractors
     print("\n" + "=" * 80)
     print("STEP 4: RUNNING EXTRACTORS")
     print("=" * 80)
-
     run_extractors()
 
-    # Final summary
+    # Summary
     print("\n" + "=" * 80)
     print("ORCHESTRATOR COMPLETE")
     print("=" * 80)
-
     existing_files = get_existing_files(downloads_dir)
     print(f"Final file count: {len(existing_files)}/{len(expected_files)}")
 
