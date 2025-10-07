@@ -4,6 +4,7 @@ Centralized settings for committee name and derived values
 """
 
 import re
+from pathlib import Path
 
 
 class Config:
@@ -121,6 +122,37 @@ class Config:
         return prefix
 
     @classmethod
+    def get_mecid_folder(cls, base_dir: str = "PDFs") -> Path:
+        """
+        Get the MECID-specific folder path.
+
+        Args:
+            base_dir: Base directory (default "PDFs")
+
+        Returns:
+            Path object for MECID subfolder like "PDFs/C2116"
+        """
+        if not cls.COMMITTEE_MECID:
+            raise ValueError("COMMITTEE_MECID must be set to use MECID folders")
+
+        return Path(base_dir) / cls.COMMITTEE_MECID
+
+    @classmethod
+    def ensure_mecid_folder(cls, base_dir: str = "PDFs") -> Path:
+        """
+        Create MECID folder if it doesn't exist and return path.
+
+        Args:
+            base_dir: Base directory (default "PDFs")
+
+        Returns:
+            Path object for MECID subfolder
+        """
+        mecid_folder = cls.get_mecid_folder(base_dir)
+        mecid_folder.mkdir(parents=True, exist_ok=True)
+        return mecid_folder
+
+    @classmethod
     def get_filename_pattern(cls, year: int, report_id: str) -> str:
         """
         Generate filename for a report.
@@ -149,6 +181,16 @@ class Config:
         return rf"{prefix_escaped}_(\d{{4}})_Step8_(\d+)\.pdf"
 
     @classmethod
+    def get_expenses_csv_path(cls, base_dir: str = "PDFs") -> Path:
+        """Get path for expenses CSV in MECID folder."""
+        return cls.get_mecid_folder(base_dir) / "expenses_data.csv"
+
+    @classmethod
+    def get_donors_csv_path(cls, base_dir: str = "PDFs") -> Path:
+        """Get path for donors CSV in MECID folder."""
+        return cls.get_mecid_folder(base_dir) / "donors_data.csv"
+
+    @classmethod
     def get_settings(cls) -> dict:
         """Get all current settings as dict."""
         return {
@@ -158,7 +200,8 @@ class Config:
             'committee_mecid': cls.COMMITTEE_MECID,
             'file_prefix': cls.get_file_prefix(),
             'display_name': cls.get_display_name(),
-            'filename_example': cls.get_filename_pattern(2024, '123456')
+            'filename_example': cls.get_filename_pattern(2024, '123456'),
+            'mecid_folder': str(cls.get_mecid_folder()) if cls.COMMITTEE_MECID else None
         }
 
 
@@ -168,12 +211,19 @@ if __name__ == "__main__":
     print("Default Configuration:")
     print(Config.get_settings())
 
+    # Show folder structure
+    print(f"\nMECID Folder: {Config.get_mecid_folder()}")
+    print(f"Expenses CSV: {Config.get_expenses_csv_path()}")
+    print(f"Donors CSV: {Config.get_donors_csv_path()}")
+
     # Search by candidate
     Config.set_search(candidate="John Smith", mecid="C9999")
     print("\nCandidate Search:")
     print(Config.get_settings())
+    print(f"MECID Folder: {Config.get_mecid_folder()}")
 
     # Search by MECID only
     Config.set_search(mecid="C1234")
     print("\nMECID Search:")
     print(Config.get_settings())
+    print(f"MECID Folder: {Config.get_mecid_folder()}")

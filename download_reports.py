@@ -1,12 +1,6 @@
 """
-Step 8: Multi-Year Processing with Captcha Avoidance
-VERSION: 8.0 - Process all available years while avoiding detection
-
-Key strategies for captcha avoidance:
-- Longer delays between years
-- Human-like reading behavior
-- Process years in chronological order (most recent first)
-- Respectful request pacing
+Multi-Year Processing with Captcha Avoidance - MECID Subfolder Version
+Downloads to PDFs/{MECID}/ subdirectories
 """
 
 import random
@@ -51,7 +45,7 @@ class StealthBrowser:
 
     def mimic_reading(self, duration_seconds=None):
         if duration_seconds is None:
-            duration_seconds = random.uniform(2, 5)  # Longer reading times
+            duration_seconds = random.uniform(2, 5)
         print(f"      Reading page for {duration_seconds:.1f}s...")
         time.sleep(duration_seconds)
 
@@ -59,14 +53,12 @@ class StealthBrowser:
 def get_existing_report_ids(downloads_dir):
     """Get list of report IDs that have already been downloaded"""
     existing_ids = set()
-
     for pdf_file in downloads_dir.glob("*.pdf"):
         filename = pdf_file.name
         match = re.search(r'(\d{5,})\.pdf$', filename)
         if match:
             report_id = match.group(1)
             existing_ids.add(report_id)
-
     return existing_ids
 
 
@@ -77,7 +69,6 @@ def wait_for_generation_complete_simple(driver, max_wait=60):
     while (time.time() - start_time) < max_wait:
         try:
             elapsed = int(time.time() - start_time)
-
             page_source = driver.page_source.lower()
             page_text = driver.find_element(By.TAG_NAME, "body").text.lower()
 
@@ -109,14 +100,13 @@ def download_pdf_simple(downloads_dir, target_filename):
     try:
         pyautogui.hotkey('ctrl', 's')
         time.sleep(3)
-
         pyautogui.hotkey('ctrl', 'a')
         time.sleep(0.5)
 
-        full_path = str(downloads_dir / target_filename)
+        # Use absolute path to ensure Chrome finds the directory
+        full_path = str(downloads_dir.resolve() / target_filename)
         pyautogui.write(full_path, interval=0.03)
         time.sleep(2)
-
         pyautogui.press('enter')
 
         for i in range(20):
@@ -133,7 +123,6 @@ def download_pdf_simple(downloads_dir, target_filename):
 
 def download_single_report(driver, stealth, report_link, downloads_dir, year, report_num, total_reports):
     """Download a single report"""
-
     report_id = report_link.text.strip()
     target_filename = Config.get_filename_pattern(year, report_id)
 
@@ -143,7 +132,6 @@ def download_single_report(driver, stealth, report_link, downloads_dir, year, re
         original_window = driver.current_window_handle
         stealth.human_click(report_link)
 
-        # Wait for new tab
         new_window = None
         for wait_time in range(1, 10):
             time.sleep(1)
@@ -167,7 +155,7 @@ def download_single_report(driver, stealth, report_link, downloads_dir, year, re
             driver.switch_to.window(original_window)
             return False, 0
 
-        time.sleep(10)  # Wait for rendering
+        time.sleep(10)
         success, file_size = download_pdf_simple(downloads_dir, target_filename)
 
         driver.close()
@@ -190,17 +178,14 @@ def download_single_report(driver, stealth, report_link, downloads_dir, year, re
 
 
 def process_single_year(driver, stealth, year, downloads_dir, existing_ids):
-    """Process all reports for a single year - IMPROVED VERSION"""
-
+    """Process all reports for a single year"""
     print(f"\n=== Processing Year {year} ===")
 
     try:
-        # IMPORTANT: Get fresh elements each time to avoid stale references
         main_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_grvReportOutside")
         expand_buttons = main_table.find_elements("css selector", "input[id*='ImgRptRight']")
         year_labels = main_table.find_elements("css selector", "span[id*='lblYear']")
 
-        # Find the specific year and its expand button
         year_index = None
         for i, label in enumerate(year_labels):
             if str(year) in label.text.strip():
@@ -212,19 +197,12 @@ def process_single_year(driver, stealth, year, downloads_dir, existing_ids):
             print(f"  Year {year} not found or no expand button")
             return 0, 0, 0
 
-        # Check if year is already expanded by looking at the expand button
         expand_button = expand_buttons[year_index]
-
-        # Click to expand this specific year
         print(f"  Expanding {year} section...")
         stealth.human_click(expand_button)
-        stealth.mimic_reading(4)  # Wait for expansion
-
-        # Wait for the specific year's content to load
+        stealth.mimic_reading(4)
         time.sleep(5)
 
-        # Now find ALL links on the page and try to identify which belong to this year
-        # This is tricky - we need to find links that appeared after expanding this year
         all_links = driver.find_elements("tag name", "a")
         potential_report_links = []
 
@@ -232,7 +210,6 @@ def process_single_year(driver, stealth, year, downloads_dir, existing_ids):
             try:
                 link_text = link.text.strip()
                 if link_text.isdigit() and len(link_text) >= 5:
-                    # Check if this link is visible and belongs to our year section
                     if link.is_displayed():
                         potential_report_links.append(link)
             except:
@@ -240,7 +217,6 @@ def process_single_year(driver, stealth, year, downloads_dir, existing_ids):
 
         print(f"  Found {len(potential_report_links)} potential report links")
 
-        # Filter out already downloaded reports
         new_report_links = []
         skipped_count = 0
 
@@ -261,7 +237,6 @@ def process_single_year(driver, stealth, year, downloads_dir, existing_ids):
             print(f"  All {year} reports already downloaded")
             return len(potential_report_links), skipped_count, 0
 
-        # Download new reports for this year
         successful_downloads = 0
 
         for i, report_link in enumerate(new_report_links):
@@ -272,11 +247,9 @@ def process_single_year(driver, stealth, year, downloads_dir, existing_ids):
 
                 if success:
                     successful_downloads += 1
-                    # Add to existing_ids to avoid downloading again
                     report_id = report_link.text.strip()
                     existing_ids.add(report_id)
 
-                # Pause between downloads within a year
                 if i < len(new_report_links) - 1:
                     time.sleep(random.uniform(2, 4))
 
@@ -293,21 +266,29 @@ def process_single_year(driver, stealth, year, downloads_dir, existing_ids):
 
 
 def run_step_8_multi_year():
-    """Step 8: Process ALL available years - FIXED VERSION"""
+    """Process ALL available years with MECID subfolders"""
 
-    downloads_dir = Path.cwd() / "PDFs"
-    downloads_dir.mkdir(exist_ok=True)
+    if not Config.COMMITTEE_MECID:
+        print("ERROR: MECID must be discovered or set before downloading")
+        print("Run orchestrator.py instead, which discovers MECID automatically")
+        return False
 
-    print("=== Step 8: Multi-Year Processing (FIXED) ===")
-    print("Will process ALL available years, no matter how many")
-    print("Each committee may have different years available")
-    print("This may take 45-90 minutes for committees with many years")
+    # Create MECID folder BEFORE configuring Chrome
+    downloads_dir = Config.ensure_mecid_folder()
 
-    # Check existing files
+    # Verify folder exists
+    if not downloads_dir.exists():
+        print(f"ERROR: Could not create folder {downloads_dir}")
+        return False
+
+    print("=== Step 8: Multi-Year Processing with MECID Folders ===")
+    print(f"Target MECID: {Config.COMMITTEE_MECID}")
+    print(f"Downloads folder: {downloads_dir}")
+    print(f"Folder exists: {downloads_dir.exists()}")
+
     existing_ids = get_existing_report_ids(downloads_dir)
     print(f"\nFound {len(existing_ids)} existing reports to skip")
 
-    # Chrome setup
     chrome_options = Options()
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
@@ -328,7 +309,6 @@ def run_step_8_multi_year():
     stealth = StealthBrowser(driver)
 
     try:
-        # Navigate to search page
         print(f"\n1. Navigating to search page...")
         print(f"   Search type: {Config.SEARCH_TYPE}")
         print(f"   Search value: {Config.get_search_value()}")
@@ -338,7 +318,6 @@ def run_step_8_multi_year():
 
         wait = WebDriverWait(driver, 15)
 
-        # Fill appropriate search field based on search type
         if Config.SEARCH_TYPE == "candidate":
             print(f"   Searching by candidate: {Config.CANDIDATE_NAME}")
             candidate_input = wait.until(EC.presence_of_element_located(
@@ -370,52 +349,70 @@ def run_step_8_multi_year():
 
         stealth.human_delay(1, 3)
 
-        # Click search button
         search_button = driver.find_element("name", "ctl00$ctl00$ContentPlaceHolder$ContentPlaceHolder1$btnSearch")
         stealth.human_click(search_button)
-        stealth.mimic_reading(3)
+        stealth.mimic_reading(5)
 
-        # Select from results
-        results_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_gvResults")
+        # Check if exact match took us directly to committee page
+        try:
+            reports_link = driver.find_element("link text", "Reports")
+            print(f"   Direct match - already on committee page")
+        except:
+            # We're on the results page - need to select committee
+            results_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_gvResults")
+            all_links = results_table.find_elements("tag name", "a")
+            mecid_pattern = re.compile(r'^[A-Z]\d{5,7}$')
 
-        # For MECID searches, should be exact match
-        if Config.SEARCH_TYPE == "mecid":
-            mecid_links = results_table.find_elements("partial link text", Config.COMMITTEE_MECID)
-            if mecid_links:
-                print(f"   Found exact MECID match")
-                stealth.human_click(mecid_links[0])
+            if Config.SEARCH_TYPE == "mecid":
+                target_mecid = Config.COMMITTEE_MECID
+                print(f"   Looking for exact MECID match: {target_mecid}")
+
+                mecid_found = False
+                for link in all_links:
+                    link_text = link.text.strip()
+                    if link_text == target_mecid:
+                        print(f"   Found exact MECID: {link_text}")
+                        stealth.human_click(link)
+                        mecid_found = True
+                        break
+
+                if not mecid_found:
+                    print(f"   ERROR: MECID {target_mecid} not found in results")
+                    print("   Available MECIDs:")
+                    for link in all_links:
+                        link_text = link.text.strip()
+                        if mecid_pattern.match(link_text):
+                            print(f"     - {link_text}")
+                    return False
             else:
-                print(f"   WARNING: MECID {Config.COMMITTEE_MECID} not found in results")
-                first_link = results_table.find_element("tag name", "a")
-                stealth.human_click(first_link)
-        else:
-            # For candidate/committee searches
-            if Config.COMMITTEE_MECID:
-                # If MECID provided, use it to select specific result
-                mecid_links = results_table.find_elements("partial link text", Config.COMMITTEE_MECID)
-                if mecid_links:
-                    print(f"   Found committee with MECID {Config.COMMITTEE_MECID}")
-                    stealth.human_click(mecid_links[0])
+                if Config.COMMITTEE_MECID:
+                    target_mecid = Config.COMMITTEE_MECID
+                    mecid_found = False
+                    for link in all_links:
+                        link_text = link.text.strip()
+                        if link_text == target_mecid:
+                            print(f"   Found committee with exact MECID {target_mecid}")
+                            stealth.human_click(link)
+                            mecid_found = True
+                            break
+
+                    if not mecid_found:
+                        print(f"   WARNING: MECID {target_mecid} not found, using first result")
+                        first_link = results_table.find_element("tag name", "a")
+                        stealth.human_click(first_link)
                 else:
-                    print(f"   WARNING: MECID {Config.COMMITTEE_MECID} not found, using first result")
+                    print(f"   Using first search result")
                     first_link = results_table.find_element("tag name", "a")
                     stealth.human_click(first_link)
-            else:
-                # No MECID specified, use first result
-                print(f"   Using first search result")
-                first_link = results_table.find_element("tag name", "a")
-                stealth.human_click(first_link)
 
-        stealth.mimic_reading(3)
+            stealth.mimic_reading(3)
+            reports_link = driver.find_element("link text", "Reports")
 
-        reports_link = driver.find_element("link text", "Reports")
         stealth.human_click(reports_link)
         stealth.mimic_reading(4)
 
-        # Discover ALL available years
         print(f"2. Discovering ALL available years...")
 
-        # Get fresh elements
         main_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_grvReportOutside")
         year_labels = main_table.find_elements("css selector", "span[id*='lblYear']")
 
@@ -425,14 +422,12 @@ def run_step_8_multi_year():
             year_text = label.text.strip()
             print(f"     Section {i}: '{year_text}'")
 
-            # Extract 4-digit year - be more flexible with matching
             year_matches = re.findall(r'(20\d{2})', year_text)
             for year_match in year_matches:
                 year = int(year_match)
                 if year not in available_years:
                     available_years.append(year)
 
-        # Sort years in reverse chronological order (most recent first)
         available_years.sort(reverse=True)
         print(f"   Extracted years: {available_years}")
 
@@ -440,7 +435,6 @@ def run_step_8_multi_year():
             print("   ERROR: No years found!")
             return False
 
-        # Process each year individually
         session_stats = {
             'total_found': 0,
             'total_skipped': 0,
@@ -455,7 +449,6 @@ def run_step_8_multi_year():
             print(f"\n{'='*60}")
             print(f"Processing Year {year} ({year_num+1}/{len(available_years)})")
 
-            # Process this specific year
             found, skipped, downloaded = process_single_year(
                 driver, stealth, year, downloads_dir, existing_ids
             )
@@ -469,18 +462,18 @@ def run_step_8_multi_year():
             else:
                 session_stats['years_failed'] += 1
 
-            # Long delay between years for captcha avoidance
             if year_num < len(available_years) - 1:
                 print(f"   Completed {year}. Taking break before next year...")
-                stealth.long_human_delay(6, 15)  # Longer delays between years
+                stealth.long_human_delay(6, 15)
 
-        # Final summary
         session_end = datetime.now()
         runtime = session_end - session_start
 
         print(f"\n{'='*80}")
         print(f"=== STEP 8 FINAL SUMMARY ===")
         print(f"Session runtime: {runtime}")
+        print(f"MECID: {Config.COMMITTEE_MECID}")
+        print(f"Download folder: {downloads_dir}")
         print(f"Years available: {len(available_years)} {available_years}")
         print(f"Years with reports: {session_stats['years_processed']}")
         print(f"Years failed/empty: {session_stats['years_failed']}")
@@ -518,7 +511,6 @@ def run_step_8_multi_year():
 if __name__ == "__main__":
     import argparse
 
-    # Parse command-line arguments to match orchestrator
     parser = argparse.ArgumentParser(description='Download MEC reports')
 
     search_group = parser.add_mutually_exclusive_group()
@@ -530,25 +522,29 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Set search parameters from command-line arguments
     if args.mecid_only:
         Config.set_search(mecid=args.mecid_only)
     elif args.candidate:
         Config.set_search(candidate=args.candidate, mecid=args.mecid)
     elif args.committee:
         Config.set_search(committee=args.committee, mecid=args.mecid)
-    # If no arguments provided, use defaults
 
-    print("Step 8: Multi-Year Processing with Captcha Avoidance")
+    print("Step 8: Multi-Year Processing with MECID Folders")
     print("=" * 55)
     print(f"Target: {Config.get_display_name()}")
     print(f"Search type: {Config.SEARCH_TYPE}")
     print(f"File prefix: {Config.get_file_prefix()}")
 
-    success = run_step_8_multi_year()
+    if Config.COMMITTEE_MECID:
+        print(f"MECID folder: {Config.get_mecid_folder()}")
+        success = run_step_8_multi_year()
 
-    if success:
-        print("\nStep 8 COMPLETE - All years processed!")
-        print(f"{Config.get_display_name()} dataset is now complete")
+        if success:
+            print("\nStep 8 COMPLETE - All years processed!")
+            print(f"{Config.get_display_name()} dataset is now complete")
+        else:
+            print("\nStep 8 had issues - check errors above")
     else:
-        print("\nStep 8 had issues - check errors above")
+        print("\nERROR: MECID must be provided")
+        print("Use: python download_reports.py --mecid-only C2116")
+        print("Or run orchestrator.py which discovers MECID automatically")

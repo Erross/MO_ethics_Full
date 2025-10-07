@@ -1,14 +1,13 @@
 """
-Report Validation Script
+Report Validation Script - MECID Subfolder Version
 Validates that PDF filenames match their actual filing dates
 
-Checks:
-- Year in filename matches filing date year in PDF
-- Identifies duplicate report IDs with conflicting years
-- Flags mismatches for review
+Usage:
+    python validate_reports.py --mecid C2116
 """
 
 import re
+import argparse
 from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Optional
@@ -19,7 +18,6 @@ from config import Config
 
 def extract_filename_info(filename: str) -> Optional[Dict]:
     """Extract year and report ID from filename using config pattern."""
-    # Use dynamic pattern from config
     pattern = Config.get_filename_regex()
     match = re.match(pattern, filename)
     if match:
@@ -38,7 +36,6 @@ def extract_filing_date_from_pdf(pdf_path: str) -> Optional[str]:
             first_page = pdf.pages[0]
             text = first_page.extract_text()
 
-            # Try multiple patterns for filing date
             date_patterns = [
                 r'Report Date\s*\n\s*(\d{1,2}/\d{1,2}/\d{4})',
                 r'DATE OF REPORT.*?(\d{1,2}/\d{1,2}/\d{4})',
@@ -62,7 +59,6 @@ def get_year_from_date(date_str: str) -> Optional[int]:
         return None
 
     try:
-        # Split by / and get last part (year)
         parts = date_str.split('/')
         if len(parts) == 3:
             return int(parts[2])
@@ -72,19 +68,28 @@ def get_year_from_date(date_str: str) -> Optional[int]:
     return None
 
 
-def validate_reports(pdfs_folder: str = "PDFs") -> tuple[bool, List[Dict]]:
+def validate_reports(mecid: str = None) -> tuple[bool, List[Dict]]:
     """
-    Validate all reports in PDFs folder.
+    Validate all reports in MECID folder.
     Returns (all_valid, issues_list)
+
+    Args:
+        mecid: MEC Committee ID (required)
     """
+    if not mecid:
+        print("ERROR: MECID is required")
+        print("Usage: python validate_reports.py --mecid C2116")
+        return False, []
 
-    pdfs_path = Path(pdfs_folder)
+    # Set Config MECID
+    Config.COMMITTEE_MECID = mecid
+    pdfs_folder = Config.get_mecid_folder()
 
-    if not pdfs_path.exists():
+    if not pdfs_folder.exists():
         print(f"ERROR: Folder '{pdfs_folder}' not found")
         return False, []
 
-    pdf_files = list(pdfs_path.glob("*.pdf"))
+    pdf_files = list(pdfs_folder.glob("*.pdf"))
 
     if not pdf_files:
         print(f"No PDF files found in '{pdfs_folder}'")
@@ -93,6 +98,8 @@ def validate_reports(pdfs_folder: str = "PDFs") -> tuple[bool, List[Dict]]:
     print("=" * 80)
     print("VALIDATING REPORT FILENAMES")
     print("=" * 80)
+    print(f"MECID: {mecid}")
+    print(f"Folder: {pdfs_folder}")
     print(f"Checking {len(pdf_files)} files...")
 
     # Group files by report ID to find duplicates
@@ -137,7 +144,6 @@ def validate_reports(pdfs_folder: str = "PDFs") -> tuple[bool, List[Dict]]:
             filename_year = file_info['filename_year']
             pdf_path = file_info['path']
 
-            # Extract filing date from PDF
             filing_date = extract_filing_date_from_pdf(str(pdf_path))
 
             if not filing_date:
@@ -211,7 +217,8 @@ def validate_reports(pdfs_folder: str = "PDFs") -> tuple[bool, List[Dict]]:
             print("\nYear Mismatches:")
             for issue in mismatches:
                 print(f"  {issue['filename']}")
-                print(f"    Should be: FHF_{issue['filing_year']}_Step8_{issue['report_id']}.pdf")
+                prefix = Config.get_file_prefix()
+                print(f"    Should be: {prefix}_{issue['filing_year']}_Step8_{issue['report_id']}.pdf")
 
         if errors:
             print("\nRead Errors:")
@@ -223,7 +230,12 @@ def validate_reports(pdfs_folder: str = "PDFs") -> tuple[bool, List[Dict]]:
 
 def main():
     """Run validation and exit with appropriate code."""
-    all_valid, issues = validate_reports(pdfs_folder="PDFs")
+    parser = argparse.ArgumentParser(description='Validate MEC report filenames')
+    parser.add_argument('--mecid', type=str, required=True, help='MEC Committee ID (e.g., C2116)')
+
+    args = parser.parse_args()
+
+    all_valid, issues = validate_reports(mecid=args.mecid)
 
     if all_valid:
         print("\n✓ Validation complete - all reports OK")

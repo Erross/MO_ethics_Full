@@ -1,6 +1,15 @@
+"""
+Expense Extractor - MECID Subfolder Version
+Extracts expense data from PDFs in MECID-specific folders
+
+Usage:
+    python expense_extractor.py --mecid C2116
+"""
+
 import pdfplumber
 import re
 import csv
+import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -42,10 +51,6 @@ def extract_report_metadata(pdf_path: str) -> Dict:
                 metadata['date_filed'] = date_match.group(1)
 
             return metadata
-    except Exception as e:
-        print(f"WARNING: Could not read {Path(pdf_path).name} - {str(e)}")
-        return None
-
 
 def filter_latest_reports(pdf_files: List[Path]) -> List[Path]:
     """Filter to keep only the most recent version of each report period."""
@@ -82,7 +87,6 @@ def filter_latest_reports(pdf_files: List[Path]) -> List[Path]:
                 print(f"  Skipping: {report[0].name} (filed {report[1]['date_filed']})")
 
     return latest_reports
-
 
 def is_expense_page(text: str) -> tuple:
     """Check if this page contains expense data. Returns (is_expense, page_types_list)."""
@@ -742,20 +746,40 @@ def extract_expenses_from_pdf(pdf_path: str, debug: bool = False) -> List[Dict]:
     return expenses
 
 
-def process_all_expenses(pdfs_folder: str = "PDFs", output_csv: str = "expenses_data.csv", debug: bool = False) -> None:
-    """Main function to process all PDFs and extract expense data."""
-    pdfs_path = Path(pdfs_folder)
+def process_all_expenses(mecid: str = None, debug: bool = False) -> None:
+    """
+    Main function to process all PDFs and extract expense data.
+    Uses MECID-specific folders.
 
-    if not pdfs_path.exists():
+    Args:
+        mecid: MEC Committee ID (required)
+        debug: Enable debug mode
+    """
+    if not mecid:
+        print("ERROR: MECID is required")
+        print("Usage: python expense_extractor.py --mecid C2116")
+        return
+
+    # Set Config MECID
+    Config.COMMITTEE_MECID = mecid
+
+    # Get MECID-specific folder
+    pdfs_folder = Config.get_mecid_folder()
+    output_csv = Config.get_expenses_csv_path()
+
+    if not pdfs_folder.exists():
         print(f"Error: Folder '{pdfs_folder}' not found")
         return
 
-    pdf_files = list(pdfs_path.glob("*.pdf"))
+    pdf_files = list(pdfs_folder.glob("*.pdf"))
 
     if not pdf_files:
         print(f"No PDF files found in '{pdfs_folder}' folder")
         return
 
+    print(f"Processing MECID: {mecid}")
+    print(f"PDFs folder: {pdfs_folder}")
+    print(f"Output CSV: {output_csv}")
     print(f"Found {len(pdf_files)} PDF file(s)")
     print("=" * 60)
 
@@ -776,7 +800,7 @@ def process_all_expenses(pdfs_folder: str = "PDFs", output_csv: str = "expenses_
             print(f"[ERROR] {pdf_file.name}: {str(e)}")
 
     if all_expenses:
-        write_expenses_to_csv(all_expenses, output_csv)
+        write_expenses_to_csv(all_expenses, str(output_csv))
         print(f"\n{'=' * 60}")
         print(f"Extracted {len(all_expenses)} total records")
         print(f"Data exported to '{output_csv}'")
@@ -808,5 +832,10 @@ def write_expenses_to_csv(expenses: List[Dict], output_file: str) -> None:
 
 
 if __name__ == "__main__":
-    DEBUG_MODE = False
-    process_all_expenses(pdfs_folder="PDFs", output_csv="expenses_data.csv", debug=DEBUG_MODE)
+    parser = argparse.ArgumentParser(description='Extract expense data from MEC reports')
+    parser.add_argument('--mecid', type=str, required=True, help='MEC Committee ID (e.g., C2116)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+
+    args = parser.parse_args()
+
+    process_all_expenses(mecid=args.mecid, debug=args.debug)

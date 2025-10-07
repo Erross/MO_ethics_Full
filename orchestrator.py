@@ -1,19 +1,6 @@
 """
-MEC Report Orchestrator
-Ensures all reports are downloaded, then runs extractors
-
-Process:
-1. Check what reports SHOULD exist (from MEC website)
-2. Compare to what DOES exist (in /PDFs)
-3. If missing files → run downloader
-4. Repeat until all files present or max retries hit
-5. Validate reports
-6. Run extractors once complete
-
-Usage:
-    python orchestrator.py                                    # Use default committee
-    python orchestrator.py --committee "Committee Name"       # Override committee
-    python orchestrator.py --committee "Committee Name" --mecid "C1234"  # With MEC ID
+MEC Report Orchestrator - MECID Subfolder Version
+Ensures all reports are downloaded to MECID folders, then runs extractors
 """
 
 import subprocess
@@ -34,10 +21,7 @@ from config import Config
 
 
 def get_expected_reports_from_website() -> Set[str]:
-    """
-    Navigate to MEC website and discover all available report IDs.
-    Returns a set of expected filenames.
-    """
+    """Navigate to MEC website and discover all available report IDs."""
     print("=" * 80)
     print("CHECKING MEC WEBSITE FOR AVAILABLE REPORTS")
     print("=" * 80)
@@ -46,7 +30,6 @@ def get_expected_reports_from_website() -> Set[str]:
     driver = None
 
     try:
-        # Chrome setup
         chrome_options = Options()
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
@@ -62,14 +45,12 @@ def get_expected_reports_from_website() -> Set[str]:
 
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # Navigate to MEC site
         print("Navigating to MEC website...")
         driver.get("https://mec.mo.gov/MEC/Campaign_Finance/CFSearch.aspx#gsc.tab=0")
         time.sleep(3)
 
         wait = WebDriverWait(driver, 15)
 
-        # Handle search type
         if Config.SEARCH_TYPE == "candidate":
             print(f"Searching by candidate: {Config.CANDIDATE_NAME}")
             candidate_input = wait.until(EC.presence_of_element_located(
@@ -96,44 +77,69 @@ def get_expected_reports_from_website() -> Set[str]:
 
         time.sleep(2)
 
-        # Click search
         search_button = driver.find_element(
             "name", "ctl00$ctl00$ContentPlaceHolder$ContentPlaceHolder1$btnSearch"
         )
         search_button.click()
-        time.sleep(3)
+        time.sleep(5)
 
-        # Select from results
-        results_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_gvResults")
-        all_links = results_table.find_elements("tag name", "a")
+        # Check if exact match took us directly to committee page
+        try:
+            reports_link = driver.find_element("link text", "Reports")
+            print("Direct match - already on committee page")
+        except:
+            # We're on the results page - need to select committee
+            results_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_gvResults")
+            all_links = results_table.find_elements("tag name", "a")
 
-        mecid_link = None
-        discovered_mecid = None
-        for link in all_links:
-            link_text = link.text.strip()
-            if re.match(r'^[A-Z]\d{5,7}$', link_text):
-                mecid_link = link
-                discovered_mecid = link_text
-                print(f"Found MECID: {link_text}")
-                if not Config.COMMITTEE_MECID:
-                    Config.COMMITTEE_MECID = discovered_mecid
-                    print(f"Saved MECID to Config: {discovered_mecid}")
-                break
+            mecid_link = None
+            discovered_mecid = None
+            mecid_pattern = re.compile(r'^[A-Z]\d{5,7}$')
 
-        if mecid_link:
-            mecid_link.click()
-        else:
-            print("WARNING: No MECID link found in results, using first link")
-            all_links[0].click()
+            if Config.SEARCH_TYPE == "mecid":
+                target_mecid = Config.COMMITTEE_MECID
+                print(f"Looking for exact MECID match: {target_mecid}")
 
-        time.sleep(3)
+                for link in all_links:
+                    link_text = link.text.strip()
+                    if link_text == target_mecid:
+                        mecid_link = link
+                        discovered_mecid = link_text
+                        print(f"Found exact MECID: {link_text}")
+                        break
 
-        # Go to Reports tab
-        reports_link = driver.find_element("link text", "Reports")
+                if not mecid_link:
+                    print(f"ERROR: MECID {target_mecid} not found in search results")
+                    print("Available MECIDs:")
+                    for link in all_links:
+                        link_text = link.text.strip()
+                        if mecid_pattern.match(link_text):
+                            print(f"  - {link_text}")
+                    return set()
+            else:
+                for link in all_links:
+                    link_text = link.text.strip()
+                    if mecid_pattern.match(link_text):
+                        mecid_link = link
+                        discovered_mecid = link_text
+                        print(f"Found MECID: {link_text}")
+                        if not Config.COMMITTEE_MECID:
+                            Config.COMMITTEE_MECID = discovered_mecid
+                            print(f"Saved MECID to Config: {discovered_mecid}")
+                        break
+
+            if mecid_link:
+                mecid_link.click()
+            else:
+                print("WARNING: No MECID link found in results")
+                return set()
+
+            time.sleep(3)
+            reports_link = driver.find_element("link text", "Reports")
+
         reports_link.click()
         time.sleep(4)
 
-        # Discover available years
         print("Discovering available years...")
         main_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_grvReportOutside")
         year_labels = main_table.find_elements("css selector", "span[id*='lblYear']")
@@ -150,7 +156,6 @@ def get_expected_reports_from_website() -> Set[str]:
         available_years.sort(reverse=True)
         print(f"Found years: {available_years}")
 
-        # Process each year
         for year in available_years:
             print(f"\nChecking year {year}...")
             main_table = driver.find_element("id", "ContentPlaceHolder_ContentPlaceHolder1_grvReportOutside")
@@ -167,7 +172,6 @@ def get_expected_reports_from_website() -> Set[str]:
                 expand_buttons[year_index].click()
                 time.sleep(5)
 
-                # Collect reports
                 all_links = driver.find_elements("tag name", "a")
                 report_ids = []
                 for link in all_links:
@@ -201,10 +205,9 @@ def get_expected_reports_from_website() -> Set[str]:
 
 
 def get_existing_files(downloads_dir: Path) -> Set[str]:
-    """Get set of filenames that already exist in PDFs directory."""
+    """Get set of filenames that already exist in MECID directory."""
     if not downloads_dir.exists():
         return set()
-
     return {pdf_file.name for pdf_file in downloads_dir.glob("*.pdf")}
 
 
@@ -229,7 +232,6 @@ def run_downloader() -> bool:
                 cmd.extend(["--mecid", Config.COMMITTEE_MECID])
 
         print(f"Running: {' '.join(cmd)}")
-
         result = subprocess.run(cmd, capture_output=False, text=True)
         return result.returncode == 0
 
@@ -239,34 +241,37 @@ def run_downloader() -> bool:
 
 
 def run_extractors() -> None:
-    """Run all extractor scripts."""
+    """Run all extractor scripts for the current MECID."""
     print("\n" + "=" * 80)
     print("RUNNING EXTRACTORS")
     print("=" * 80)
 
-    extractors = ["expense_extractor.py", "donor_extractor.py"]
+    if not Config.COMMITTEE_MECID:
+        print("ERROR: MECID not set, cannot run extractors")
+        return
 
-    for extractor in extractors:
-        print(f"\n>>> Running {extractor}...")
+    extractors = [
+        ("expense_extractor.py", "expenses"),
+        ("donor_extractor.py", "donors")
+    ]
+
+    for extractor_file, data_type in extractors:
+        print(f"\n>>> Running {extractor_file} for MECID {Config.COMMITTEE_MECID}...")
         try:
-            result = subprocess.run([sys.executable, extractor], capture_output=False, text=True)
+            cmd = [sys.executable, extractor_file, "--mecid", Config.COMMITTEE_MECID]
+            result = subprocess.run(cmd, capture_output=False, text=True)
             if result.returncode == 0:
-                print(f"✓ {extractor} completed successfully")
+                print(f"✓ {extractor_file} completed successfully")
             else:
-                print(f"✗ {extractor} failed with code {result.returncode}")
+                print(f"✗ {extractor_file} failed with code {result.returncode}")
         except Exception as e:
-            print(f"ERROR running {extractor}: {e}")
+            print(f"ERROR running {extractor_file}: {e}")
 
 
 def main():
     """Main orchestrator logic."""
     parser = argparse.ArgumentParser(
-        description='MEC Report Orchestrator - Download and extract campaign finance reports',
-        epilog='Examples:\n'
-               '  python orchestrator.py --committee "Francis Howell Families"\n'
-               '  python orchestrator.py --candidate "John Smith" --mecid "C1234"\n'
-               '  python orchestrator.py --mecid-only "C2116"',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description='MEC Report Orchestrator - Download and extract campaign finance reports'
     )
 
     search_group = parser.add_mutually_exclusive_group()
@@ -277,7 +282,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure search
     if args.mecid_only:
         Config.set_search(mecid=args.mecid_only)
     elif args.candidate:
@@ -290,19 +294,15 @@ def main():
     print(f"  Value: {Config.get_search_value()}")
     print(f"  File prefix: {Config.get_file_prefix()}")
 
-    downloads_dir = Path.cwd() / "PDFs"
-    downloads_dir.mkdir(exist_ok=True)
     MAX_RETRIES = 20
 
     print("\n" + "=" * 80)
-    print("MEC REPORT ORCHESTRATOR")
+    print("MEC REPORT ORCHESTRATOR - MECID SUBFOLDER VERSION")
     print("=" * 80)
     print(f"Target: {Config.get_display_name()}")
     print(f"File prefix: {Config.get_file_prefix()}")
     print(f"Max retry attempts: {MAX_RETRIES}")
-    print(f"Downloads directory: {downloads_dir}")
 
-    # Step 1: Expected reports
     print("\n" + "=" * 80)
     print("STEP 1: CHECKING WHAT REPORTS SHOULD EXIST")
     print("=" * 80)
@@ -312,9 +312,15 @@ def main():
         print("\nERROR: Could not determine expected reports from website")
         sys.exit(1)
 
-    print(f"\nExpected {len(expected_files)} total reports")
+    if not Config.COMMITTEE_MECID:
+        print("\nERROR: Could not determine MECID from website")
+        sys.exit(1)
 
-    # Step 2: Download loop
+    downloads_dir = Config.ensure_mecid_folder()
+    print(f"\nMECID: {Config.COMMITTEE_MECID}")
+    print(f"Downloads directory: {downloads_dir}")
+    print(f"Expected {len(expected_files)} total reports")
+
     print("\n" + "=" * 80)
     print("STEP 2: DOWNLOAD LOOP")
     print("=" * 80)
@@ -359,13 +365,13 @@ def main():
         if response.lower() != 'y':
             sys.exit(1)
 
-    # Step 3: Validation
     print("\n" + "=" * 80)
     print("STEP 3: VALIDATING REPORTS")
     print("=" * 80)
 
     try:
-        result = subprocess.run([sys.executable, "validate_reports.py"], capture_output=False, text=True)
+        cmd = [sys.executable, "validate_reports.py", "--mecid", Config.COMMITTEE_MECID]
+        result = subprocess.run(cmd, capture_output=False, text=True)
         if result.returncode != 0:
             print("\n⚠ Validation found issues with report filenames")
             response = input("Continue with extractors anyway? (y/n): ")
@@ -377,24 +383,33 @@ def main():
         if response.lower() != 'y':
             sys.exit(1)
 
-    # Step 4: Extractors
     print("\n" + "=" * 80)
     print("STEP 4: RUNNING EXTRACTORS")
     print("=" * 80)
     run_extractors()
 
-    # Summary
     print("\n" + "=" * 80)
     print("ORCHESTRATOR COMPLETE")
     print("=" * 80)
+    print(f"MECID: {Config.COMMITTEE_MECID}")
+    print(f"Download directory: {downloads_dir}")
+
     existing_files = get_existing_files(downloads_dir)
     print(f"Final file count: {len(existing_files)}/{len(expected_files)}")
 
+    expenses_csv = Config.get_expenses_csv_path()
+    donors_csv = Config.get_donors_csv_path()
+
+    if expenses_csv.exists():
+        print(f"✓ Expenses CSV: {expenses_csv}")
+    if donors_csv.exists():
+        print(f"✓ Donors CSV: {donors_csv}")
+
     if existing_files == expected_files:
-        print("✓ All reports downloaded and extracted!")
+        print("\n✓ All reports downloaded and extracted!")
     else:
         missing_count = len(expected_files - existing_files)
-        print(f"⚠ {missing_count} reports still missing")
+        print(f"\n⚠ {missing_count} reports still missing")
 
 
 if __name__ == "__main__":
